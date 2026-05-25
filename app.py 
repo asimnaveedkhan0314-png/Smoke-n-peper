@@ -1,0 +1,112 @@
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = "change-this-secret-key"
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///inventory.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+@app.before_first_request
+def create_tables():
+    db.create_all()
+    if not User.query.filter_by(username="admin").first():
+        admin = User(
+            username="admin",
+            password_hash=generate_password_hash("admin123")
+        )
+        db.session.add(admin)
+        db.session.commit()
+
+@app.route("/", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        user = User.query.filter_by(username=username).first()
+
+        if user and check_password_hash(user.password_hash, password):
+            login_user(user)
+            return redirect(url_for("dashboard"))
+        flash("Invalid username or password")
+
+    return render_template("login.html")
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    return render_template("dashboard.html")
+
+@app.route("/history")
+@login_required
+def history():
+    return render_template("history.html")
+
+@app.route("/branches")
+@login_required
+def branches():
+    return render_template("branches.html")
+
+@app.route("/products")
+@login_required
+def products():
+    return render_template("products.html")
+
+@app.route("/edit-branch")
+@login_required
+def edit_branch():
+    return render_template("edit_branch.html")
+
+@app.route("/edit-product")
+@login_required
+def edit_product():
+    return render_template("edit_product.html")
+
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    if request.method == "POST":
+        old_password = request.form.get("old_password")
+        new_password = request.form.get("new_password")
+        confirm_password = request.form.get("confirm_password")
+
+        if new_password != confirm_password:
+            flash("New passwords do not match")
+            return redirect(url_for("change_password"))
+
+        if not check_password_hash(current_user.password_hash, old_password):
+            flash("Current password is wrong")
+            return redirect(url_for("change_password"))
+
+        current_user.password_hash = generate_password_hash(new_password)
+        db.session.commit()
+        flash("Password updated")
+        return redirect(url_for("dashboard"))
+
+    return render_template("change_password.html")
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+if __name__ == "__main__":
+    app.run(debug=True)
